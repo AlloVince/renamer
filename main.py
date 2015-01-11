@@ -22,7 +22,11 @@ def print_path(file):
 
 def bango_to_dmmbango(bango):
     res = re.match(r'([a-zA-Z]{2,6})-?(\d{2,5})', bango)
+
     if res:
+        digit = res.group(1).lower()
+        if digit == 'dv':
+            return '53dv0' + res.group(2)
         return res.expand('\g<1>00\g<2>')
     else:
         return None
@@ -37,8 +41,7 @@ def find_bango_in_file(file):
     # print("processing %s", file.as_uri())
     bango = re.search(r'([a-zA-Z]{2,6})-?(\d{2,5})', filename)
     if bango:
-        #dmmbango = bango.expand('\g<1>00\g<2>')
-        logging.info("Found bango: %s" % bango.group())
+        logging.warning("Found bango: %s" % bango.group())
         return bango.group()
     else:
         logging.warning("Result: Not found bango, skiped")
@@ -113,7 +116,6 @@ def parse_video(html):
 
 
 def get_video_detail(bango):
-    print bango
     url = "http://www.dmm.co.jp/digital/videoa/-/detail/=/cid=" + bango_to_dmmbango(bango)
     logging.info("Try to request url: %s" % url)
     search_result = requests.get(url)
@@ -128,7 +130,7 @@ def get_video_detail(bango):
             "Try search bango: %s" % "http://www.dmm.co.jp/search/=/n1=FgRCTw9VBA4GAVhfWkIHWw__/searchstr=" + bango)
         # Still not found
         if search_result.status_code != 200 or re.search(ur'一致する商品は見つかりませんでした', search_result.text):
-            logging.warning("Result: not found in website by %s" % search_result.status_code)
+            logging.warning("Result: not found in website by %s in %s" % (search_result.status_code, search_result.url))
             return None
         dom = PyQuery(search_result.text)
         items = dom("#list li")
@@ -240,14 +242,14 @@ def process(file):
 
 # single file test:
 # process(Path("Z:/somefile"))
+# print(bango_to_dmmbango("dv1687"))
+
 
 for ext in ["avi", "mkv", "mp4"]:
     files = Path(source_dir).rglob('*.' + ext)
     for cfile in files:
         try:
             process(cfile)
-        except Exception as inst:
-            print(type(inst))
-            print(inst.args)
-
-            # logging.warning("Result: Unkown exception happens for %s, detail:\n %s" % (print_path(file), traceback.print_exc()))
+        except:
+            #logging.warning("Result: Unkown exception happens for %s, detail:\n %s" % (print_path(cfile), traceback.print_exc()))
+            continue
