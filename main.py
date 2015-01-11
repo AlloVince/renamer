@@ -8,15 +8,28 @@ from pyquery import PyQuery
 import json
 import os
 import logging
+import traceback
 
-source_dir = 'Z:\TDDOWNLOAD'
+source_dir = 'Z:\AV'
 target_dir = 'Z:\AV2'
 rename_format = '%actor% - %title% [%bango%]'
-logging.basicConfig(level=logging.INFO)
+# Debug:
+# logging.basicConfig(level=logging.INFO)
 
+
+def print_path(file):
+    return file.as_posix().decode('gbk').encode('utf8')
+
+def bango_to_dmmbango(bango):
+    res = re.match(r'([a-zA-Z]{2,6})-?(\d{2,5})', bango)
+    if res:
+        return res.expand('\g<1>00\g<2>')
+    else:
+        return None
 
 def find_bango_in_file(file):
-    logging.info("---------------------------\nProcessing: %s" % file.as_posix().decode('gbk').encode('utf8'))
+    logging.warning("--------------------------------------------------------------------------------------")
+    logging.warning("Processing: %s" % print_path(file))
     """
     :type file: PurePath
     """
@@ -24,12 +37,11 @@ def find_bango_in_file(file):
     # print("processing %s", file.as_uri())
     bango = re.search(r'([a-zA-Z]{2,6})-?(\d{2,5})', filename)
     if bango:
-        dmmbango = bango.expand('\g<1>00\g<2>')
-        logging.info("Found bango: %s, expand to dmm format: %s" % (bango.group(), dmmbango))
-        return dmmbango
-        # return bango.group()
+        #dmmbango = bango.expand('\g<1>00\g<2>')
+        logging.info("Found bango: %s" % bango.group())
+        return bango.group()
     else:
-        logging.info("Not found bango")
+        logging.warning("Result: Not found bango, skiped")
         return None
 
 
@@ -101,24 +113,28 @@ def parse_video(html):
 
 
 def get_video_detail(bango):
-    url = "http://www.dmm.co.jp/digital/videoa/-/detail/=/cid=" + bango
+    print bango
+    url = "http://www.dmm.co.jp/digital/videoa/-/detail/=/cid=" + bango_to_dmmbango(bango)
     logging.info("Try to request url: %s" % url)
     search_result = requests.get(url)
     """
     :type search_result: requests
     """
 
-    if search_result.status_code == 404:
+    if search_result.status_code == 404 or re.search(ur'一致する商品は見つかりませんでした', search_result.text):
         # Try search for once
         search_result = requests.get("http://www.dmm.co.jp/search/=/n1=FgRCTw9VBA4GAVhfWkIHWw__/searchstr=" + bango)
-        logging.info("Try search bango: %s" % "http://www.dmm.co.jp/search/=/n1=FgRCTw9VBA4GAVhfWkIHWw__/searchstr=" + bango)
+        logging.info(
+            "Try search bango: %s" % "http://www.dmm.co.jp/search/=/n1=FgRCTw9VBA4GAVhfWkIHWw__/searchstr=" + bango)
         # Still not found
-        if search_result.status_code != 200:
+        if search_result.status_code != 200 or re.search(ur'一致する商品は見つかりませんでした', search_result.text):
+            logging.warning("Result: not found in website by %s" % search_result.status_code)
             return None
         dom = PyQuery(search_result.text)
         items = dom("#list li")
         if items.length > 1:
-            logging.error("Found more than 1 result: %s" % "http://www.dmm.co.jp/search/=/n1=FgRCTw9VBA4GAVhfWkIHWw__/searchstr=" + bango)
+            logging.error(
+                "Result: Found more than 1 result: %s, please handle by yourself" % "http://www.dmm.co.jp/search/=/n1=FgRCTw9VBA4GAVhfWkIHWw__/searchstr=" + bango)
             return None
         url = items.eq(0).find("a").eq(0).attr("href")
         if not url:
@@ -127,7 +143,7 @@ def get_video_detail(bango):
         search_result = requests.get(url)
 
     if search_result.status_code != 200:
-        logging.info("Video request failed by: %s" % search_result.status_code)
+        logging.warning("Result: Video request failed by: %s" % search_result.status_code)
         return None
 
     video = parse_video(search_result.text)
@@ -138,7 +154,7 @@ def get_video_detail(bango):
 def arrange_file(video, file):
     target_path = target_dir + '/' + video['maker_label'][0]['name'].encode("gbk")
 
-    logging.info("Target path: %s" % target_path)
+    logging.info("Target path: %s" % print_path(Path(target_path)))
     if Path(target_path).exists() is False:
         Path(target_path).mkdir(parents=True, mode=0o777)
         logging.warning("Target path not exists and be created")
@@ -153,8 +169,8 @@ def arrange_file(video, file):
     target_cover = target_path + "/" + (target_file + '.jpg').encode("gbk")
     target_file = target_path + "/" + (target_file + file.suffix).encode("gbk")
 
-    if Path(target_file).exists():
-        logging.error("Target %s exists" % target_file)
+    if Path(target_cover).exists():
+        logging.error("Result: Target %s exists, skiped" % print_path(Path(target_file)))
         return None
 
     if Path(target_cover).exists() is False:
@@ -163,14 +179,14 @@ def arrange_file(video, file):
             open(target_cover, "wb").write(response.content)
             logging.info("Download cover from %s" % (response.url))
         else:
-            logging.warning("Download cover failed, not move")
+            logging.warning("Result: Download cover failed, not move")
             return None
 
     # Real Move
     file.rename(Path(target_file))
     # Fake move
     # Path(target_file).touch(exist_ok=True)
-    logging.warning("Move to target file: %s" % target_file.as_posix().decode('gbk').encode('utf8'))
+    logging.warning("Result: Move to target file: %s" % print_path(Path(target_file)))
     return target_file
 
 
@@ -178,7 +194,7 @@ def humansize(nbytes):
     suffixes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
     if nbytes == 0: return '0 B'
     i = 0
-    while nbytes >= 1024 and i < len(suffixes)-1:
+    while nbytes >= 1024 and i < len(suffixes) - 1:
         nbytes /= 1024.
         i += 1
     f = ('%.2f' % nbytes).rstrip('0').rstrip('.')
@@ -211,19 +227,27 @@ def delete_empty_dir(file):
         logging.info("Dir %s size %s, not remove" % (file, humansize(size)))
 
 
+def process(file):
+    bango = find_bango_in_file(file)
+    if not bango:
+        return None
+    video = get_video_detail(bango)
+    if not video:
+        return None
+    res = arrange_file(video, file)
+    delete_empty_dir(file)
+
+
+# single file test:
+# process(Path("Z:/somefile"))
+
 for ext in ["avi", "mkv", "mp4"]:
     files = Path(source_dir).rglob('*.' + ext)
-    for file in files:
+    for cfile in files:
         try:
-            bango = find_bango_in_file(file)
-            if not bango:
-                continue
-            video = get_video_detail(bango)
-            if not video:
-                continue
-            res = arrange_file(video, file)
-            if not res:
-                continue
-            delete_empty_dir(file)
-        except:
-            logging.warning("Exception happens")
+            process(cfile)
+        except Exception as inst:
+            print(type(inst))
+            print(inst.args)
+
+            # logging.warning("Result: Unkown exception happens for %s, detail:\n %s" % (print_path(file), traceback.print_exc()))
