@@ -10,26 +10,14 @@ import os
 import logging
 import traceback
 
-source_dir = 'Z:\AV'
-target_dir = 'Z:\AV2'
+source_dir = 'Z:\Issue'
+target_dir = 'Z:\dist'
 rename_format = '%actor% - %title% [%bango%]'
 # Debug:
 # logging.basicConfig(level=logging.INFO)
 
-
 def print_path(file):
     return file.as_posix().decode('gbk').encode('utf8')
-
-def bango_to_dmmbango(bango):
-    res = re.match(r'([a-zA-Z]{2,6})-?(\d{2,5})', bango)
-
-    if res:
-        digit = res.group(1).lower()
-        if digit == 'dv':
-            return '53dv0' + res.group(2)
-        return res.expand('\g<1>00\g<2>')
-    else:
-        return None
 
 def find_bango_in_file(file):
     logging.warning("--------------------------------------------------------------------------------------")
@@ -48,126 +36,47 @@ def find_bango_in_file(file):
         return None
 
 
-def parse_video(html):
-    item = {}
-    dom = PyQuery(html)
-    item['title'] = dom("#title").text()
-    item['image_urls'] = [dom("#sample-video > a").eq(0).attr('href')]
-    item['symbol_original'] = dom("#sample-video > a").eq(0).attr('id')
-    if not item['symbol_original']:
-        item['symbol_original'] = dom("input[name=content_id]").eq(0).attr('value')
-
-    if not item['symbol_original']:
-        return []
-    p = re.compile(r'(\d*)([a-zA-Z]+)00(\d+)')
-    item['symbol'] = p.sub(r'\2\3', item['symbol_original'])
-
-    def links_to_list(links):
-        res = []
-        for link in links.find('a').items():
-            res.append({
-                'id': re.findall('id=(\d+)', link.attr('href'))[0],
-                'name': link.text(),
-            })
-        return res
-
-    meta_map = {
-        u'出演者：': 'casts',
-        u'監督：': 'directors',
-        u'配信開始日：': 'pubdates',
-        # u'商品発売日：': 'saledates',
-        u'メーカー：': 'maker',
-        u'レーベル：': 'maker_label',
-        u'収録時間：': 'durations',
-        u'出演者：': 'casts',
-        u'シリーズ：': 'series',
-        u'ジャンル：': 'tags',
-        u'平均評価：': 'rating',
-    }
-    meta_table = dom('.page-detail table.mg-b20').eq(0)
-    for meta in meta_table.find('tr'):
-        meta = PyQuery(meta).find('td')
-        meta_title = meta.eq(0).text().rstrip().lstrip()
-        if meta_title and meta_map.get(meta_title):
-            meta_key = meta_map[meta_title]
-            item[meta_key] = meta.eq(1)
-
-    item['casts'] = links_to_list(item['casts'])
-    item['directors'] = links_to_list(item['directors'])
-    item['maker'] = links_to_list(item['maker'])
-    item['maker_label'] = links_to_list(item['maker_label'])
-    item['tags'] = links_to_list(item['tags'])
-    item['durations'] = re.findall(u'(\d+)分', item['durations'].text())[0]
-    # item['saledates'] = timelib.strtodatetime(
-    # item['saledates'].text()).strftime("%Y-%m-%d")
-    series = links_to_list(item['series'])
-    item['series'] = series[0] if series else None
-    item['rating'] = re.findall(
-        '(\d+)\.gif', item['rating'].find('img').attr('src'))[0]
-
-    item['summary'] = meta_table.nextAll().eq(1).text()
-
-    photos = []
-    for img in dom('#sample-image-block img').items():
-        photos.append(img.attr('src').replace('-', 'jp-'))
-
-    item['photos'] = photos
-    return item
-
-
-def get_video_detail(bango):
-    url = "http://www.dmm.co.jp/digital/videoa/-/detail/=/cid=" + bango_to_dmmbango(bango)
-    logging.info("Try to request url: %s" % url)
-    search_result = requests.get(url)
-    """
-    :type search_result: requests
-    """
-
-    if search_result.status_code == 404 or re.search(ur'一致する商品は見つかりませんでした', search_result.text):
-        # Try search for once
-        search_result = requests.get("http://www.dmm.co.jp/search/=/n1=FgRCTw9VBA4GAVhfWkIHWw__/searchstr=" + bango)
-        logging.info(
-            "Try search bango: %s" % "http://www.dmm.co.jp/search/=/n1=FgRCTw9VBA4GAVhfWkIHWw__/searchstr=" + bango)
-        # Still not found
-        if search_result.status_code != 200 or re.search(ur'一致する商品は見つかりませんでした', search_result.text):
-            logging.warning("Result: not found in website by %s in %s" % (search_result.status_code, search_result.url))
-            return None
-        dom = PyQuery(search_result.text)
-        items = dom("#list li")
-        if items.length > 1:
-            logging.error(
-                "Result: Found more than 1 result: %s, please handle by yourself" % "http://www.dmm.co.jp/search/=/n1=FgRCTw9VBA4GAVhfWkIHWw__/searchstr=" + bango)
-            return None
-        url = items.eq(0).find("a").eq(0).attr("href")
-        if not url:
-            return None
-        logging.info("Re-Try to request url: %s" % url)
-        search_result = requests.get(url)
+def get_movie_detail(bango):
+    # Try search for once
+    search_url = "http://yinxing.com/v1/movies?q="
+    search_result = requests.get(
+        search_url + bango, timeout=2)
+    logging.warning(
+        "Try search bango: %s" % search_url + bango)
 
     if search_result.status_code != 200:
-        logging.warning("Result: Video request failed by: %s" % search_result.status_code)
+        logging.warning("Result: not found in website by %s in %s" % (search_result.status_code, search_result.url))
         return None
+    search_result = json.loads(search_result.text)
+    # print search_result['items'][0]['link']
+    # print re.search("-/detail/=", search_result['items'][0]['link'])
+    if len(search_result['results']) < 1:
+        logging.warning("Result: not found %s in %s" % (search_result.status_code, search_result.url))
+        return None
+    return search_result['results'][0]
 
-    video = parse_video(search_result.text)
-    logging.info("Video detail: %s" % json.dumps(video, ensure_ascii=False))
-    return video
+def path_filter(name):
+    name = name.replace('/', '.')
+    # name = name.replace('・', '.')
+    return name
 
 
-def arrange_file(video, file):
-    target_path = target_dir + '/' + video['maker_label'][0]['name'].encode("gbk")
-
-    logging.info("Target path: %s" % print_path(Path(target_path)))
+def arrange_file(movie, file):
+    maker = movie['maker']['name'] if movie['maker'] else 'unknown'
+    logging.warning("movie %s" % movie)
+    target_path = target_dir + '/' + path_filter(maker).encode("gbk")
+    logging.warning("Target path: %s" % print_path(Path(target_path)))
     if Path(target_path).exists() is False:
         Path(target_path).mkdir(parents=True, mode=0o777)
         logging.warning("Target path not exists and be created")
 
-    casts = video["casts"]
+    casts = movie["casts"]
     casts_list = []
     for cast in casts:
         casts_list.append(cast["name"])
     casts_list.reverse()
     casts = "" if len(casts_list) < 1 else ", ".join(casts_list) + " - "
-    target_file = "%s%s [%s]" % (casts, video['title'], video['symbol'])
+    target_file = "%s%s [%s]" % (casts, path_filter(movie['title']), path_filter(movie['banngo']))
     target_cover = target_path + "/" + (target_file + '.jpg').encode("gbk")
     target_file = target_path + "/" + (target_file + file.suffix).encode("gbk")
 
@@ -176,7 +85,7 @@ def arrange_file(video, file):
         return None
 
     if Path(target_cover).exists() is False:
-        response = requests.get(video["image_urls"][0])
+        response = requests.get(movie["images"][2], timeout=2)
         if response.ok:
             open(target_cover, "wb").write(response.content)
             logging.info("Download cover from %s" % (response.url))
@@ -233,10 +142,10 @@ def process(file):
     bango = find_bango_in_file(file)
     if not bango:
         return None
-    video = get_video_detail(bango)
-    if not video:
+    movie = get_movie_detail(bango)
+    if not movie:
         return None
-    res = arrange_file(video, file)
+    res = arrange_file(movie, file)
     delete_empty_dir(file)
 
 
@@ -251,5 +160,5 @@ for ext in ["avi", "mkv", "mp4"]:
         try:
             process(cfile)
         except:
-            #logging.warning("Result: Unkown exception happens for %s, detail:\n %s" % (print_path(cfile), traceback.print_exc()))
+            # logging.warning("Result: Unkown exception happens for %s, detail:\n %s" % (print_path(cfile), traceback.print_exc()))
             continue
